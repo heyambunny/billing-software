@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-
+from config import BASE_URL
 
 # ================= FORMAT =================
 def format_inr_short(value):
@@ -11,25 +11,6 @@ def format_inr_short(value):
     elif value >= 1e5:
         return f"₹ {value/1e5:.2f} L"
     return f"₹ {value:,.0f}"
-
-
-# ================= ROLE FILTER =================
-def get_allowed_clients(conn):
-    role_id = st.session_state.get("role_id")
-    user_id = st.session_state.get("user_id")
-
-    if role_id == 1:  # Admin
-        return None
-
-    if role_id == 3:  # Supervisor
-        df = pd.read_sql(
-            "SELECT client_id FROM user_client_access WHERE user_id = %s",
-            conn,
-            params=(user_id,)
-        )
-        return df["client_id"].tolist()
-
-    return None
 
 
 def show_dashboard(conn):
@@ -52,36 +33,25 @@ def show_dashboard(conn):
 
     st.title("📊 Management Dashboard")
 
-    # ================= LOAD =================
-    query = """
-    SELECT
-        b.id,
-        b.client_id,
-        c.client_name,
-        b.client_billed_amount,
-        b.invoice_month,
-        b.financial_year,
-        b.status,
-        COALESCE(ve.total_vendor, 0) AS vendor_cost,
-        COALESCE(cn.cn_amount, 0) AS credit_note
-    FROM billing_entries b
-    LEFT JOIN clients c ON b.client_id = c.id
-    LEFT JOIN (
-        SELECT billing_entry_id, SUM(amount) AS total_vendor
-        FROM vendor_expenses GROUP BY billing_entry_id
-    ) ve ON b.id = ve.billing_entry_id
-    LEFT JOIN credit_notes cn ON b.id = cn.billing_entry_id
-    WHERE b.status != 'Deleted'
-    """
+    # ================= API CALL =================
+    import requests
 
-    # ================= APPLY ROLE FILTER =================
-    allowed_clients = get_allowed_clients(conn)
+    token = st.session_state.get("token")
 
-    if allowed_clients is None:
-        df = pd.read_sql(query, conn)
-    else:
-        query += " AND b.client_id = ANY(%s)"
-        df = pd.read_sql(query, conn, params=(allowed_clients,))
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+
+    res = requests.get(
+        f"{BASE_URL}/api/dashboard",
+        headers=headers
+    )
+
+    if res.status_code != 200:
+        st.error("Failed to fetch dashboard data")
+        return
+
+    df = pd.DataFrame(res.json())
 
     if df.empty:
         st.warning("No data available")
@@ -192,26 +162,14 @@ def show_dashboard(conn):
     - 📊 Avg Efficiency: **{avg_eff:.2f}%**
     """)
 
-    # ================= VENDOR (ROLE SAFE) =================
+    # ================= VENDOR =================
     st.subheader("💰 Vendor Distribution")
 
-    vendor_query = """
-    SELECT v.vendor_name, SUM(ve.amount) AS total_payout
-    FROM vendor_expenses ve
-    LEFT JOIN vendors v ON ve.vendor_id = v.id
-    LEFT JOIN billing_entries b ON ve.billing_entry_id = b.id
-    WHERE b.status != 'Deleted'
-    """
+    vendor_df = df.groupby("client_name").agg({
+        "vendor_cost": "sum"
+    }).reset_index()
 
-    if allowed_clients is not None:
-        vendor_query += " AND b.client_id = ANY(%s)"
-        vendor_df = pd.read_sql(vendor_query + " GROUP BY v.vendor_name",
-                                conn,
-                                params=(allowed_clients,))
-    else:
-        vendor_df = pd.read_sql(vendor_query + " GROUP BY v.vendor_name", conn)
-
-    st.plotly_chart(px.pie(vendor_df, names="vendor_name", values="total_payout", hole=0.4),
+    st.plotly_chart(px.pie(vendor_df, names="client_name", values="vendor_cost", hole=0.4),
                     use_container_width=True)
 
     # ================= CONTRIBUTION =================

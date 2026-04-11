@@ -1,11 +1,17 @@
 import streamlit as st
 import pandas as pd
 from utils.audit import log_audit
+from config import BASE_URL
 
-#
 def show_convert_billing(conn):
 
     st.header("Convert Projection → Billing")
+    if "billing_msg" in st.session_state:
+        if st.session_state["billing_msg"] == "deleted":
+            st.toast("Marked as Deleted ✅")
+        else:
+            st.toast("Converted to Billing ✅")
+        del st.session_state["billing_msg"]
 
     user_id = int(st.session_state.user_id)
     role_id = st.session_state.role_id
@@ -23,17 +29,14 @@ def show_convert_billing(conn):
             b.financial_year AS "Financial Year",
             b.invoice_description AS "Description",
             b.client_billed_amount AS "Amount"
-        
         FROM billing_entries b
         JOIN clients c ON b.client_id = c.id
         JOIN programs p ON b.program_id = p.id
         JOIN categories cat ON b.category_id = cat.id
-        
         WHERE b.invoice_no IS NULL
         AND b.status = 'Active'
         ORDER BY b.id DESC
         """
-
         df = pd.read_sql(query, conn)
 
     else:
@@ -47,22 +50,16 @@ def show_convert_billing(conn):
             b.financial_year AS "Financial Year",
             b.invoice_description AS "Description",
             b.client_billed_amount AS "Amount"
-        
         FROM billing_entries b
         JOIN clients c ON b.client_id = c.id
         JOIN programs p ON b.program_id = p.id
         JOIN categories cat ON b.category_id = cat.id
-
-        JOIN user_client_access uca
-            ON b.client_id = uca.client_id
-        
+        JOIN user_client_access uca ON b.client_id = uca.client_id
         WHERE b.invoice_no IS NULL
         AND b.status = 'Active'
         AND uca.user_id = %s
-        
         ORDER BY b.id DESC
         """
-
         df = pd.read_sql(query, conn, params=(user_id,))
 
     # ---------------- TABLE ----------------
@@ -85,9 +82,19 @@ def show_convert_billing(conn):
         st.divider()
         st.subheader("Convert to Billing")
 
-        amount = st.number_input(
+        st.text_input(
+            "Invoice Description",
+            value=str(row.get("Description", "")),
+            disabled=True
+        )
+
+        # 🔥 AMOUNT LOCKED
+        amount = float(row["Amount"])
+
+        st.text_input(
             "Amount",
-            value=float(row["Amount"]),
+            value=str(amount),
+            disabled=True,
             key=f"amount_{projection_id}"
         )
 
@@ -154,12 +161,21 @@ def show_convert_billing(conn):
             v1, v2 = st.columns(2)
 
             default_amount = 0.0
+            default_vendor_name = "None"
+
             if i < len(existing_vendors):
                 default_amount = float(existing_vendors.iloc[i]["amount"])
+                vendor_id = existing_vendors.iloc[i]["vendor_id"]
+
+                # 🔥 FIX: MAP ID → NAME
+                match = vendors[vendors["id"] == vendor_id]
+                if not match.empty:
+                    default_vendor_name = match.iloc[0]["vendor_name"]
 
             vendor_name = v1.selectbox(
                 f"Vendor {i+1}",
                 vendor_options,
+                index=vendor_options.index(default_vendor_name),
                 key=f"vendor_{projection_id}_{i}"
             )
 
@@ -181,121 +197,52 @@ def show_convert_billing(conn):
 
         if st.button("Save", key=f"save_{projection_id}"):
 
-            cursor = conn.cursor()
+            import requests
 
-            old_data = pd.read_sql(
-                "SELECT * FROM billing_entries WHERE id = %s",
-                conn,
-                params=(projection_id,)
-            ).iloc[0]
+            token = st.session_state.get("token")
 
-            # -------- DELETE CASE --------
-            if status == "Deleted":
+            if not token:
+                st.error("User not authenticated")
+                return
 
-                if not delete_reason.strip():
-                    st.error("Delete reason is mandatory")
+            payload = {
+                "projection_id": projection_id,
+                "amount": float(amount),
+                "status": status,
+                "delete_reason": delete_reason,
+                "funnel_number": funnel_number,
+                "invoice_no": invoice_no,
+                "invoice_date": str(invoice_date),
+                "vendors": [
+                    {"vendor_id": vid, "amount": amt}
+                    for vid, amt in vendor_data
+                ]
+            }
+
+            headers = {
+                "Authorization": f"Bearer {token}"
+            }
+
+            try:
+                res = requests.post(
+                    f"{BASE_URL}/api/convert-billing",
+                    json=payload,
+                    headers=headers
+                )
+
+                st.write(res.status_code, res.text)
+
+                if res.status_code != 200:
+                    st.error(res.json().get("detail", "Error"))
                     return
 
-                log_audit(cursor, "billing_entries", projection_id, "status",
-                          old_data["status"], "Deleted", "UPDATE",
-                          user_id, role_id, "billing", "HIGH")
+                if status == "Deleted":
+                    st.session_state["billing_msg"] = "deleted"
+                else:
+                    st.session_state["billing_msg"] = "converted"
 
-                log_audit(cursor, "billing_entries", projection_id, "reason",
-                          old_data.get("reason", ""), delete_reason.strip(),
-                          "UPDATE", user_id, role_id, "billing", "MEDIUM")
-
-                cursor.execute("""
-                    UPDATE billing_entries
-                    SET status = 'Deleted',
-                        reason = %s
-                    WHERE id = %s
-                """, (delete_reason.strip(), projection_id))
-
-                conn.commit()
-                st.success("Marked as Deleted ✅")
+                st.rerun()
                 return
 
-            # -------- VALIDATION --------
-
-            if not funnel_number or not invoice_no:
-                st.error("Funnel & Invoice required")
-                return
-
-            # -------- AUDIT BILLING --------
-
-            if old_data["client_billed_amount"] != amount:
-                log_audit(cursor, "billing_entries", projection_id,
-                          "client_billed_amount",
-                          old_data["client_billed_amount"], amount,
-                          "UPDATE", user_id, role_id, "billing", "HIGH")
-
-            if old_data.get("invoice_no") != invoice_no:
-                log_audit(cursor, "billing_entries", projection_id,
-                          "invoice_no",
-                          old_data.get("invoice_no"), invoice_no,
-                          "UPDATE", user_id, role_id, "billing", "HIGH")
-
-            if str(old_data.get("invoice_date")) != str(invoice_date):
-                log_audit(cursor, "billing_entries", projection_id,
-                          "invoice_date",
-                          old_data.get("invoice_date"), invoice_date,
-                          "UPDATE", user_id, role_id, "billing", "MEDIUM")
-
-            # -------- UPDATE --------
-
-            cursor.execute("""
-                UPDATE billing_entries
-                SET
-                    client_billed_amount = %s,
-                    funnel_number = %s,
-                    invoice_no = %s,
-                    invoice_date = %s,
-                    expense_type_id = 2
-                WHERE id = %s
-            """, (
-                amount,
-                funnel_number,
-                invoice_no,
-                invoice_date,
-                projection_id
-            ))
-
-            # -------- VENDOR AUDIT --------
-
-            existing_vendor_data = pd.read_sql("""
-                SELECT vendor_id, amount
-                FROM vendor_expenses
-                WHERE billing_entry_id = %s
-            """, conn, params=(projection_id,))
-
-            for _, r in existing_vendor_data.iterrows():
-                log_audit(cursor, "vendor_expenses", projection_id,
-                          "vendor_removed",
-                          f"vendor_id={r['vendor_id']}, amount={r['amount']}",
-                          None, "DELETE",
-                          user_id, role_id, "vendor", "HIGH")
-
-            cursor.execute("""
-                DELETE FROM vendor_expenses
-                WHERE billing_entry_id = %s
-            """, (projection_id,))
-
-            for vendor_id, amt in vendor_data:
-                cursor.execute("""
-                    INSERT INTO vendor_expenses
-                    (billing_entry_id, vendor_id, amount)
-                    VALUES (%s,%s,%s)
-                """, (projection_id, vendor_id, float(amt)))
-
-                log_audit(cursor, "vendor_expenses", projection_id,
-                          "vendor_added",
-                          None,
-                          f"vendor_id={vendor_id}, amount={amt}",
-                          "INSERT",
-                          user_id, role_id, "vendor", "HIGH")
-
-            conn.commit()
-
-            st.success("Converted to Billing ✅")
-            from utils.refresh import trigger_refresh
-            trigger_refresh("✅ Done")
+            except Exception as e:
+                st.error(f"Error connecting to backend: {e}")

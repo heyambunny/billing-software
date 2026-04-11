@@ -1,35 +1,37 @@
 import streamlit as st
+import requests
 from db import get_connection
 from login import show_login
 from utils.refresh import init_refresh, trigger_refresh
-
-from _pages_backup.add_projection import show_add_projection
-from _pages_backup.convert_billing import show_convert_billing
-from _pages_backup.reports import show_reports
-from _pages_backup.client_access import show_client_access
-from _pages_backup.dashboard import show_dashboard
-from _pages_backup.billed import show_billed_amount
-from _pages_backup.finance_dashboard import show_finance_dashboard
-from _pages_backup.bulk_upload import show_bulk_upload
-from _pages_backup.edit_projection import show_edit_projection
 from utils.welcome import show_welcome_screen
-from _pages_backup.audit_logs import audit_log_page
+from config import BASE_URL
+
+# ---------------- IMPORT PAGES ----------------
+from frontend.pages.dashboard import show_dashboard
+from frontend.pages.add_projection import show_add_projection
+from frontend.pages.convert_billing import show_convert_billing
+from frontend.pages.reports import show_reports
+from frontend.pages.client_access import show_client_access
+from frontend.pages.finance_dashboard import show_finance_dashboard
+from frontend.pages.billed import show_billed_amount
+from frontend.pages.edit_projection import show_edit_projection
+from frontend.pages.bulk_upload import show_bulk_upload
+from frontend.pages.audit_logs import audit_log_page
 
 # ---------------------------
 # Page Config
 # ---------------------------
-
 st.set_page_config(page_title="Billing Software", layout="wide")
 
 # ---------------------------
 # SESSION DEFAULTS
 # ---------------------------
-
 defaults = {
     "logged_in": False,
     "user_id": None,
     "user_name": "",
-    "role_id": None
+    "role_id": None,
+    "token": None
 }
 
 for key, value in defaults.items():
@@ -37,49 +39,66 @@ for key, value in defaults.items():
         st.session_state[key] = value
 
 # ---------------------------
-# LOGIN GUARD (STRICT)
+# 🔥 RESTORE SESSION FROM TOKEN (FIX)
 # ---------------------------
+if not st.session_state.get("logged_in"):
+    token = st.query_params.get("token")
 
+    if token:
+        try:
+            res = requests.get(
+                f"{BASE_URL}/api/me",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+
+            if res.status_code == 200:
+                user = res.json()
+
+                st.session_state["token"] = token
+                st.session_state["user_id"] = user["id"]
+                st.session_state["user_name"] = user["name"]
+                st.session_state["role_id"] = user["role_id"]
+                st.session_state["logged_in"] = True
+
+        except Exception as e:
+            print("Token restore failed:", e)
+
+# ---------------------------
+# LOGIN GUARD
+# ---------------------------
 if not st.session_state.get("logged_in"):
     show_login()
     st.stop()
 
 # ---------------------------
-# UI
+# UI HEADER
 # ---------------------------
-
 st.title("Billing Software")
 st.sidebar.write("Logged in as:", st.session_state.get("user_name"))
 
 # ---------------------------
-# LOGOUT (WORKING)
+# LOGOUT (FIXED)
 # ---------------------------
-
 if st.sidebar.button("Logout"):
     st.session_state.clear()
+    st.query_params.clear()   # 🔥 IMPORTANT
     st.rerun()
-
-init_refresh()
-
-if st.sidebar.button("🔄 Refresh Data"):
-    trigger_refresh("🔄 Data refreshed")
 
 # ---------------------------
 # DB CONNECTION
 # ---------------------------
-
 conn = get_connection()
 
 # ---------------------------
 # ROLE BASED UI
 # ---------------------------
-
 role = st.session_state.get("role_id")
 
+# ---------------- ADMIN ----------------
 if role == 1:
 
     tab0, tab1, tab2, tab3, tab4 = st.tabs([
-        "Dashboard", "Reports", "Client Access Control", "Bulk Upload","Audit Logs"
+        "Dashboard", "Reports", "Client Access Control", "Bulk Upload", "Audit Logs"
     ])
 
     with tab0:
@@ -100,6 +119,7 @@ if role == 1:
     with tab4:
         audit_log_page(conn)
 
+# ---------------- SUPERVISOR ----------------
 elif role == 3:
 
     tab0, tab1 = st.tabs([
@@ -112,6 +132,7 @@ elif role == 3:
     with tab1:
         show_reports(conn)
 
+# ---------------- OTHER USERS ----------------
 else:
 
     tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -132,6 +153,6 @@ else:
 
     with tab4:
         show_reports(conn)
-    
+
     with tab5:
         show_edit_projection(conn)

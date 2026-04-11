@@ -1,11 +1,15 @@
 import streamlit as st
 import pandas as pd
-from utils.audit import log_audit
-#
+from config import BASE_URL
 
 def show_edit_projection(conn):
 
     st.header("Edit Projections")
+
+    # ---------------- SUCCESS MESSAGE (FIXED) ----------------
+    if "success_message" in st.session_state:
+        st.success(st.session_state["success_message"])
+        del st.session_state["success_message"]
 
     # ---------------- USER VALIDATION ----------------
     if "user_id" not in st.session_state:
@@ -97,21 +101,18 @@ def show_edit_projection(conn):
         WHERE billing_entry_id = %s
     """, conn, params=(billing_id,))
 
-    existing_vendor_set = set(
-        (int(r["vendor_id"]), float(r["amount"]))
-        for _, r in existing_vendors_df.iterrows()
-    )
-
+    # 🔥 RESET STATE WHEN RECORD CHANGES
     if st.session_state.get("current_proj_id") != billing_id:
         st.session_state.current_proj_id = billing_id
         st.session_state.vendor_rows = max(1, len(existing_vendors_df))
 
     col1, col2 = st.columns(2)
 
-    if col1.button("Add Vendor"):
+    # 🔥 UNIQUE KEYS FIX
+    if col1.button("Add Vendor", key=f"add_vendor_{billing_id}"):
         st.session_state.vendor_rows += 1
 
-    if col2.button("Remove Vendor") and st.session_state.vendor_rows > 1:
+    if col2.button("Remove Vendor", key=f"remove_vendor_{billing_id}") and st.session_state.vendor_rows > 1:
         st.session_state.vendor_rows -= 1
 
     vendor_options = ["None"] + list(vendors["vendor_name"])
@@ -163,15 +164,16 @@ def show_edit_projection(conn):
             vendor_data.append((vendor_id, float(vendor_amount)))
             total_vendor += vendor_amount
 
-    new_vendor_set = set(vendor_data)
-
     # ================= MARGIN =================
     margin = amount - total_vendor
     st.subheader(f"💰 Margin: ₹ {margin:,.0f}")
 
-    # ================= UPDATE =================
-    if st.button("Update Projection"):
+    # ================= SAVE (API + RESET + MESSAGE FIX) =================
+    if st.button("Update Projection", key=f"update_proj_{billing_id}"):
 
+        import requests
+
+        # -------- VALIDATION --------
         if not description.strip():
             st.error("Description is mandatory")
             return
@@ -180,40 +182,38 @@ def show_edit_projection(conn):
             st.error("Amount must be greater than 0")
             return
 
-        cursor = conn.cursor()
+        token = st.session_state.get("token")
 
-        old_description = row["Description"]
-        old_amount = float(row["Amount"])
+        payload = {
+            "billing_id": billing_id,
+            "description": description.strip(),
+            "amount": float(amount),
+            "vendors": [
+                {"vendor_id": vid, "amount": amt}
+                for vid, amt in vendor_data
+            ]
+        }
 
-        # -------- AUDIT --------
-        if old_description != description:
-            log_audit(cursor, "billing_entries", billing_id,
-                      "invoice_description", old_description, description,
-                      "UPDATE", user_id, role, "Projection", "Low")
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
 
-        if old_amount != float(amount):
-            log_audit(cursor, "billing_entries", billing_id,
-                      "client_billed_amount", old_amount, amount,
-                      "UPDATE", user_id, role, "Projection", "High")
+        res = requests.post(
+            f"{BASE_URL}/api/edit-projection",
+            json=payload,
+            headers=headers
+        )
 
-        # -------- UPDATE MAIN --------
-        cursor.execute("""
-            UPDATE billing_entries
-            SET invoice_description=%s,
-                client_billed_amount=%s
-            WHERE id=%s
-        """, (description, float(amount), billing_id))
+        if res.status_code != 200:
+            st.error("Update failed ❌")
+            return
 
-        # -------- VENDOR UPDATE --------
-        if existing_vendor_set != new_vendor_set:
-            cursor.execute("DELETE FROM vendor_expenses WHERE billing_entry_id=%s", (billing_id,))
-            for v, a in vendor_data:
-                cursor.execute("""
-                    INSERT INTO vendor_expenses (billing_entry_id, vendor_id, amount)
-                    VALUES (%s,%s,%s)
-                """, (billing_id, v, a))
+        # 🔥 STORE MESSAGE
+        st.session_state["success_message"] = f"Projection {billing_id} updated successfully ✅"
 
-        conn.commit()
+        # 🔥 RESET FORM
+        st.session_state.pop("selected_proj_index", None)
+        st.session_state.pop("current_proj_id", None)
+        st.session_state.pop("vendor_rows", None)
 
-        # ✅ SUCCESS (NO RERUN)
-        st.success(f"Projection {billing_id} updated successfully ✅")
+        st.rerun()

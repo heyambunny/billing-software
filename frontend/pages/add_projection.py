@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import requests
+from config import BASE_URL
 
-#updated
 from utils.refresh import refresh_listener
 _ = refresh_listener()
 
@@ -180,77 +181,63 @@ def show_add_projection(conn):
 
     # ---------------- SAVE ----------------
     if st.button("Save Projection", key=f"save_{form_key}"):
-
+    
         if not description.strip():
             st.error("Description is mandatory")
             st.stop()
-
+    
         if amount <= 0:
             st.error("Amount must be greater than 0")
             st.stop()
-
-        cursor = conn.cursor()
-
-        cursor.execute("""
-        SELECT id FROM expense_types
-        WHERE expense_type_name = 'Projected'
-        """)
-        expense_type_id = cursor.fetchone()[0]
-
-        cursor.execute("""
-        INSERT INTO billing_entries
-        (
-            client_id,
-            program_id,
-            expense_type_id,
-            category_id,
-            invoice_description,
-            client_billed_amount,
-            invoice_month,
-            financial_year,
-            projection_date,
-            status,
-            created_by_user_id
-        )
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,CURRENT_DATE,'Active',%s)
-        RETURNING id
-        """,
-        (
-            client_id,
-            program_id,
-            expense_type_id,
-            category_id,
-            description,
-            float(amount),
-            invoice_month,
-            financial_year,
-            user_id
-        ))
-
-        billing_id = cursor.fetchone()[0]
-
-        for vendor_id, vendor_amount in vendor_data:
-            cursor.execute("""
-            INSERT INTO vendor_expenses
-            (billing_entry_id, vendor_id, amount)
-            VALUES (%s,%s,%s)
-            """,
-            (
-                billing_id,
-                vendor_id,
-                float(vendor_amount)
-            ))
-
-        conn.commit()
-
-        # 🔥 CORE RESET LOGIC
-        st.session_state.form_version += 1
-        st.session_state.vendor_rows = 1
-        st.session_state["projection_saved"] = True
-
-        from utils.refresh import trigger_refresh
-
-        trigger_refresh("✅ Done")
+    
+        token = st.session_state.get("token")
+    
+        if not token:
+            st.error("User not authenticated. Please login again.")
+            st.stop()
+    
+        payload = {
+            "client_id": client_id,
+            "program_id": program_id,
+            "category_id": category_id,
+            "description": description,
+            "amount": float(amount),
+            "invoice_month": invoice_month,
+            "financial_year": financial_year,
+            "vendors": [
+                {"vendor_id": vid, "amount": amt}
+                for vid, amt in vendor_data
+            ]
+        }
+    
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
+    
+        try:
+            res = requests.post(
+                f"{BASE_URL}/api/projection",
+                json=payload,
+                headers=headers
+            )
+    
+            # 🔍 DEBUG (keep for now)
+            st.write("Status:", res.status_code)
+            st.write("Response:", res.text)
+    
+            if res.status_code != 200:
+                st.error(res.json().get("detail", "Something went wrong"))
+                st.stop()
+    
+            # ✅ SUCCESS (same as your old logic)
+            st.session_state.form_version += 1
+            st.session_state.vendor_rows = 1
+            st.session_state["projection_saved"] = True
+    
+            st.rerun()
+    
+        except Exception as e:
+            st.error(f"Error connecting to backend: {e}")
 
     # ---------------- SUCCESS POPUP ----------------
     if st.session_state.get("projection_saved"):

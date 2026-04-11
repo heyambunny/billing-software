@@ -1,32 +1,18 @@
 import streamlit as st
-import bcrypt
-from db import get_connection
-
-
-# ---------------- PASSWORD CHECK ----------------
-def verify_password(input_password, stored_password):
-    try:
-        # Handle bcrypt hashed passwords
-        if stored_password.startswith("$2b$") or stored_password.startswith("$2a$"):
-            return bcrypt.checkpw(input_password.encode(), stored_password.encode())
-        else:
-            # Fallback for plain text passwords (your current DB case)
-            return input_password == stored_password
-    except:
-        return False
-
+import requests
+from config import BASE_URL
 
 # ---------------- LOGIN FUNCTION ----------------
 def show_login():
-
-    conn = get_connection()
-    cursor = conn.cursor()
 
     st.title("🔐 Billing Software Login")
 
     # ---------------- SESSION INIT ----------------
     if "logged_in" not in st.session_state:
         st.session_state["logged_in"] = False
+
+    if "token" not in st.session_state:
+        st.session_state["token"] = None
 
     if "user_id" not in st.session_state:
         st.session_state["user_id"] = None
@@ -36,6 +22,31 @@ def show_login():
 
     if "role_id" not in st.session_state:
         st.session_state["role_id"] = None
+
+    # ---------------- RESTORE SESSION ----------------
+    if not st.session_state["logged_in"]:
+        token = st.query_params.get("token")
+
+        if token:
+            try:
+                res = requests.get(
+                    f"{BASE_URL}/api/me",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+
+                if res.status_code == 200:
+                    user = res.json()
+
+                    st.session_state["token"] = token
+                    st.session_state["user_id"] = user["id"]
+                    st.session_state["user_name"] = user["name"]
+                    st.session_state["role_id"] = user["role_id"]
+                    st.session_state["logged_in"] = True
+
+                    st.rerun()
+
+            except:
+                pass
 
     # ---------------- LOGIN SCREEN ----------------
     if not st.session_state["logged_in"]:
@@ -49,41 +60,34 @@ def show_login():
                 st.warning("Please enter email and password")
                 return
 
-            # 🔥 Trim to avoid hidden space issues
-            email = email.strip()
-            password = password.strip()
+            try:
+                res = requests.post(
+                    f"{BASE_URL}/api/login",
+                    json={"email": email.strip(), "password": password.strip()}
+                )
 
-            cursor.execute("""
-                SELECT id, name, password_hash, role_id
-                FROM users
-                WHERE email = %s AND is_active = TRUE
-            """, (email,))
-
-            user = cursor.fetchone()
-
-            if user:
-
-                user_id, name, db_password, role_id = user
-
-                # ✅ PASSWORD CHECK (fixed)
-                if verify_password(password, db_password):
-
-                    st.session_state["logged_in"] = True
-                    st.session_state["user_id"] = user_id
-                    st.session_state["user_name"] = name
-                    st.session_state["role_id"] = role_id
-
-                    st.success("Login successful ✅")
-                    st.session_state.logged_in = True
-                    st.session_state.user_name = name   # or whatever variable you have
-                    st.session_state.show_welcome = True
-                    st.rerun()
-
-                else:
+                if res.status_code != 200:
                     st.error("Invalid credentials ❌")
+                    return
 
-            else:
-                st.error("Invalid credentials ❌")
+                data = res.json()
+                token = data["access_token"]
+
+                # ✅ STORE SESSION
+                st.session_state["token"] = token
+                st.session_state["user_id"] = data["user"]["id"]
+                st.session_state["user_name"] = data["user"]["name"]
+                st.session_state["role_id"] = data["user"]["role_id"]
+                st.session_state["logged_in"] = True
+
+                # 🔥 STORE TOKEN IN URL
+                st.query_params["token"] = token
+
+                st.success("Login successful ✅")
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Error connecting to backend: {e}")
 
     # ---------------- AFTER LOGIN ----------------
     else:
@@ -95,6 +99,6 @@ def show_login():
 
 # ---------------- LOGOUT ----------------
 def logout():
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
+    st.session_state.clear()
+    st.query_params.clear()
     st.rerun()

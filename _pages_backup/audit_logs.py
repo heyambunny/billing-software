@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-
+#
 # ---------------- BADGES ---------------- #
 def impact_badge(level):
     colors = {

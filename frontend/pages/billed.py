@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
+from config import BASE_URL
 
-#
 from utils.refresh import refresh_listener
 _ = refresh_listener()
 
@@ -80,7 +80,7 @@ def show_billed_amount(conn):
             disabled=True
         )
 
-        # ================= CREDIT NOTE (SINGLE) =================
+        # ================= CREDIT NOTE =================
         st.subheader("Credit Note")
 
         existing_cn = pd.read_sql("""
@@ -188,57 +188,40 @@ def show_billed_amount(conn):
         margin = billed_amount - total_vendor - total_cn
         st.subheader(f"💰 Margin: ₹ {margin:,.0f}")
 
-        # ================= SAVE =================
+        # ================= SAVE (API) =================
         if st.button("Update Billing"):
 
-            cursor = conn.cursor()
+            import requests
 
-            # -------- CN UPSERT --------
-            if cn_no and cn_amt > 0 and cn_desc.strip():
+            token = st.session_state.get("token")
 
-                if cn_id:
-                    cursor.execute("""
-                        UPDATE credit_notes
-                        SET credit_note_no=%s,
-                            credit_note_date=%s,
-                            cn_amount=%s,
-                            cn_description=%s
-                        WHERE id=%s
-                    """, (cn_no.strip(), cn_date, cn_amt, cn_desc.strip(), cn_id))
+            payload = {
+                "billing_id": billing_id,
+                "credit_note": {
+                    "credit_note_no": cn_no.strip(),
+                    "credit_note_date": str(cn_date),
+                    "cn_amount": cn_amt,
+                    "cn_description": cn_desc.strip()
+                },
+                "vendors": [
+                    {"vendor_id": vid, "amount": amt}
+                    for vid, amt in vendor_data
+                ]
+            }
 
-                else:
-                    cursor.execute("""
-                        INSERT INTO credit_notes
-                        (billing_entry_id, credit_note_no, credit_note_date, cn_amount, cn_description)
-                        VALUES (%s,%s,%s,%s,%s)
-                    """, (billing_id, cn_no.strip(), cn_date, cn_amt, cn_desc.strip()))
+            headers = {
+                "Authorization": f"Bearer {token}"
+            }
 
-            # -------- VENDOR SAFE UPDATE --------
-            existing_vendor_set = set(
-                (int(row["vendor_id"]), float(row["amount"]))
-                for _, row in existing_vendors.iterrows()
+            res = requests.post(
+                f"{BASE_URL}/api/update-billed",
+                json=payload,
+                headers=headers
             )
 
-            new_vendor_set = set(vendor_data)
+            if res.status_code != 200:
+                st.error("Update failed ❌")
+                return
 
-            if existing_vendor_set != new_vendor_set:
-
-                cursor.execute("""
-                    DELETE FROM vendor_expenses
-                    WHERE billing_entry_id = %s
-                """, (billing_id,))
-
-                for vendor_id, amt in vendor_data:
-                    cursor.execute("""
-                        INSERT INTO vendor_expenses
-                        (billing_entry_id, vendor_id, amount)
-                        VALUES (%s,%s,%s)
-                    """, (billing_id, vendor_id, amt))
-
-            conn.commit()
-
-            # ✅ Show success AFTER rerun
             st.session_state["show_success"] = True
-            from utils.refresh import trigger_refresh
-
-            trigger_refresh("✅ Done")
+            st.rerun()
