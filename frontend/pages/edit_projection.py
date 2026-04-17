@@ -65,7 +65,7 @@ def show_edit_projection(conn):
     )
 
     # ---------------- STORE SELECTION ----------------
-    if selected["selection"]["rows"]:
+    if selected["selection"]["rows"] and "selected_proj_index" not in st.session_state:
         st.session_state["selected_proj_index"] = selected["selection"]["rows"][0]
 
     row_index = st.session_state.get("selected_proj_index")
@@ -212,8 +212,16 @@ def show_edit_projection(conn):
         st.session_state["success_message"] = f"Projection {billing_id} updated successfully ✅"
 
         # 🔥 RESET FORM
-        st.session_state.pop("selected_proj_index", None)
-        st.session_state.pop("current_proj_id", None)
-        st.session_state.pop("vendor_rows", None)
+        # st.session_state.pop("selected_proj_index", None)
+        # st.session_state.pop("current_proj_id", None)
+        # st.session_state.pop("vendor_rows", None)
 
+        # Clear all related state
+        for key in ["selected_proj_index", "current_proj_id", "vendor_rows"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        
+        # ALSO clear dataframe selection trigger
+        st.session_state["_dataframe_selection"] = None
+        
         st.rerun()

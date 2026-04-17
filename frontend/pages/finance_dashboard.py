@@ -13,7 +13,7 @@ def show_finance_dashboard(conn):
     headers = {"Authorization": f"Bearer {token}"}
 
     res = requests.get(
-        f"{BASE_URL}/finance-dashboard",
+        f"{BASE_URL}/api/finance-dashboard",
         headers=headers
     )
 
