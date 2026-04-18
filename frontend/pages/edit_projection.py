@@ -26,6 +26,7 @@ def show_edit_projection(conn):
         c.client_name AS "Client",
         p.program_name AS "Program",
         cat.category_name AS "Category",
+        b.invoice_month AS "Invoice Month",
         b.invoice_description AS "Description",
         b.client_billed_amount AS "Amount"
     FROM billing_entries b

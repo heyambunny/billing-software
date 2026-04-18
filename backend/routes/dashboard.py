@@ -27,7 +27,7 @@ def get_dashboard(token: str = Depends(oauth2_scheme)):
             b.client_billed_amount,
             b.invoice_month,
             b.financial_year,
-            b.status,
+            b.expense_type_id,
             COALESCE(ve.total_vendor, 0) AS vendor_cost,
             COALESCE(cn.cn_amount, 0) AS credit_note
         FROM billing_entries b

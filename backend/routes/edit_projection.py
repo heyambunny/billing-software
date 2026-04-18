@@ -28,7 +28,7 @@ def edit_projection(data: dict, token: str = Depends(oauth2_scheme)):
 
         # ---------------- FETCH OLD ----------------
         cursor.execute("""
-            SELECT invoice_description, client_billed_amount
+            SELECT invoice_description, client_billed_amount, invoice_month
             FROM billing_entries
             WHERE id = %s
         """, (billing_id,))

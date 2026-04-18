@@ -79,8 +79,8 @@ def show_dashboard(conn):
     # ================= FINANCIAL =================
     st.header("📊 Financial Overview")
 
-    billed = df[df["status"] == "Billed"]
-    projected = df[df["status"] != "Billed"]
+    billed = df[df["expense_type_id"]!= 1]
+    projected = df[df["expense_type_id"] == 1]
 
     def calc(d):
         amt = d["client_billed_amount"].sum()
