@@ -38,7 +38,7 @@ def edit_projection(data: dict, token: str = Depends(oauth2_scheme)):
         if not old:
             raise HTTPException(status_code=404, detail="Projection not found")
 
-        old_description, old_amount = old
+        old_description, old_amount, old_month = old
 
         # ---------------- VALIDATION ----------------
         if not data.get("description"):

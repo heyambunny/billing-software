@@ -139,6 +139,7 @@ def show_finance_dashboard(conn):
 
     # -------- TABLE --------
     display_df = df[[
+        "id",
         "client_name",
         "program_name",
         "category_name",

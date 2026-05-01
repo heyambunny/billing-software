@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
+import datetime
 from config import BASE_URL
 
 def show_edit_projection(conn):
 
     st.header("Edit Projections")
 
-    # ---------------- SUCCESS MESSAGE (FIXED) ----------------
+    # ---------------- SUCCESS MESSAGE ----------------
     if "success_message" in st.session_state:
         st.success(st.session_state["success_message"])
         del st.session_state["success_message"]
@@ -35,7 +36,7 @@ def show_edit_projection(conn):
     JOIN categories cat ON b.category_id = cat.id
     """
 
-    # ---------------- ROLE BASED FILTER ----------------
+    # ---------------- ROLE FILTER ----------------
     if role == "admin":
         query = base_query + """
         WHERE b.expense_type_id = 1
@@ -57,7 +58,6 @@ def show_edit_projection(conn):
         st.info("No projections found")
         return
 
-    # ---------------- TABLE ----------------
     selected = st.dataframe(
         df,
         use_container_width=True,
@@ -65,8 +65,7 @@ def show_edit_projection(conn):
         on_select="rerun"
     )
 
-    # ---------------- STORE SELECTION ----------------
-    if selected["selection"]["rows"] and "selected_proj_index" not in st.session_state:
+    if selected["selection"]["rows"]:
         st.session_state["selected_proj_index"] = selected["selection"]["rows"][0]
 
     row_index = st.session_state.get("selected_proj_index")
@@ -89,6 +88,28 @@ def show_edit_projection(conn):
     description = st.text_area("Description", value=row["Description"])
     amount = st.number_input("Amount", min_value=0.0, value=float(row["Amount"]))
 
+    # ================= ✅ SAFE INVOICE MONTH FIX =================
+    raw_month = row["Invoice Month"]
+
+    try:
+        parsed_date = pd.to_datetime(raw_month)
+
+        # Fix invalid / garbage dates
+        if pd.isna(parsed_date) or parsed_date.year < 1900:
+            parsed_date = datetime.date.today().replace(day=1)
+        else:
+            parsed_date = parsed_date.date()
+
+    except:
+        parsed_date = datetime.date.today().replace(day=1)
+
+    invoice_month = st.date_input(
+        "Invoice Month",
+        value=parsed_date
+    )
+
+    invoice_month_str = invoice_month.strftime("%b-%y")
+
     # ================= VENDORS =================
     st.subheader("Vendor Expenses")
 
@@ -102,18 +123,16 @@ def show_edit_projection(conn):
         WHERE billing_entry_id = %s
     """, conn, params=(billing_id,))
 
-    # 🔥 RESET STATE WHEN RECORD CHANGES
     if st.session_state.get("current_proj_id") != billing_id:
         st.session_state.current_proj_id = billing_id
         st.session_state.vendor_rows = max(1, len(existing_vendors_df))
 
     col1, col2 = st.columns(2)
 
-    # 🔥 UNIQUE KEYS FIX
-    if col1.button("Add Vendor", key=f"add_vendor_{billing_id}"):
+    if col1.button("Add Vendor", key=f"add_vendor_{billing_id}_{row_index}"):
         st.session_state.vendor_rows += 1
 
-    if col2.button("Remove Vendor", key=f"remove_vendor_{billing_id}") and st.session_state.vendor_rows > 1:
+    if col2.button("Remove Vendor", key=f"remove_vendor_{billing_id}_{row_index}") and st.session_state.vendor_rows > 1:
         st.session_state.vendor_rows -= 1
 
     vendor_options = ["None"] + list(vendors["vendor_name"])
@@ -169,12 +188,11 @@ def show_edit_projection(conn):
     margin = amount - total_vendor
     st.subheader(f"💰 Margin: ₹ {margin:,.0f}")
 
-    # ================= SAVE (API + RESET + MESSAGE FIX) =================
+    # ================= SAVE =================
     if st.button("Update Projection", key=f"update_proj_{billing_id}"):
 
         import requests
 
-        # -------- VALIDATION --------
         if not description.strip():
             st.error("Description is mandatory")
             return
@@ -189,6 +207,7 @@ def show_edit_projection(conn):
             "billing_id": billing_id,
             "description": description.strip(),
             "amount": float(amount),
+            "invoice_month": invoice_month_str,  # ✅ INCLUDED
             "vendors": [
                 {"vendor_id": vid, "amount": amt}
                 for vid, amt in vendor_data
@@ -209,20 +228,10 @@ def show_edit_projection(conn):
             st.error("Update failed ❌")
             return
 
-        # 🔥 STORE MESSAGE
         st.session_state["success_message"] = f"Projection {billing_id} updated successfully ✅"
 
-        # 🔥 RESET FORM
-        # st.session_state.pop("selected_proj_index", None)
-        # st.session_state.pop("current_proj_id", None)
-        # st.session_state.pop("vendor_rows", None)
+        st.session_state.pop("selected_proj_index", None)
+        st.session_state.pop("current_proj_id", None)
+        st.session_state.pop("vendor_rows", None)
 
-        # Clear all related state
-        for key in ["selected_proj_index", "current_proj_id", "vendor_rows"]:
-            if key in st.session_state:
-                del st.session_state[key]
-        
-        # ALSO clear dataframe selection trigger
-        st.session_state["_dataframe_selection"] = None
-        
         st.rerun()

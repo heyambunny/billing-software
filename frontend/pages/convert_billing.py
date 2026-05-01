@@ -88,14 +88,16 @@ def show_convert_billing(conn):
             disabled=True
         )
 
-        # 🔥 AMOUNT LOCKED
-        amount = float(row["Amount"])
+        # 🔥 UPDATED AMOUNT (EDITABLE + STATE)
+        amount_key = f"amount_{projection_id}"
 
-        st.text_input(
+        if amount_key not in st.session_state:
+            st.session_state[amount_key] = float(row["Amount"])
+
+        st.number_input(
             "Amount",
-            value=str(amount),
-            disabled=True,
-            key=f"amount_{projection_id}"
+            value=float(st.session_state[amount_key]),
+            key=amount_key
         )
 
         status = st.selectbox(
@@ -167,7 +169,6 @@ def show_convert_billing(conn):
                 default_amount = float(existing_vendors.iloc[i]["amount"])
                 vendor_id = existing_vendors.iloc[i]["vendor_id"]
 
-                # 🔥 FIX: MAP ID → NAME
                 match = vendors[vendors["id"] == vendor_id]
                 if not match.empty:
                     default_vendor_name = match.iloc[0]["vendor_name"]
@@ -207,7 +208,7 @@ def show_convert_billing(conn):
 
             payload = {
                 "projection_id": projection_id,
-                "amount": float(amount),
+                "amount": float(st.session_state[amount_key]),  # ✅ UPDATED
                 "status": status,
                 "delete_reason": delete_reason,
                 "funnel_number": funnel_number,
@@ -235,6 +236,17 @@ def show_convert_billing(conn):
                 if res.status_code != 200:
                     st.error(res.json().get("detail", "Error"))
                     return
+
+                # 🔥 AUDIT LOG ADDED
+                old_amount = float(row["Amount"])
+                new_amount = float(st.session_state[amount_key])
+
+                if old_amount != new_amount:
+                    log_audit(
+                        user_id,
+                        "UPDATE_BILLING_AMOUNT",
+                        f"Projection {projection_id}: {old_amount} → {new_amount}"
+                    )
 
                 if status == "Deleted":
                     st.session_state["billing_msg"] = "deleted"
