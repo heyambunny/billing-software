@@ -194,7 +194,12 @@ def show_convert_billing(conn):
                 )
                 vendor_data.append((vendor_id, vendor_amount))
 
+        total_vendor = sum([amt for _, amt in vendor_data])
+        margin = float(st.session_state[amount_key]) - total_vendor
+        st.subheader(f"💰 Margin: ₹ {margin:,.0f}")
+
         # ---------------- SAVE ----------------
+
 
         if st.button("Save", key=f"save_{projection_id}"):
 
