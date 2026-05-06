@@ -6,11 +6,13 @@ from config import BASE_URL
 def show_convert_billing(conn):
 
     st.header("Convert Projection → Billing")
+
     if "billing_msg" in st.session_state:
         if st.session_state["billing_msg"] == "deleted":
             st.toast("Marked as Deleted ✅")
         else:
             st.toast("Converted to Billing ✅")
+
         del st.session_state["billing_msg"]
 
     user_id = int(st.session_state.user_id)
@@ -19,6 +21,7 @@ def show_convert_billing(conn):
     # ---------------- DATA ----------------
 
     if role_id == 1:
+
         query = """
         SELECT
             b.id,
@@ -37,9 +40,11 @@ def show_convert_billing(conn):
         AND b.status = 'Active'
         ORDER BY b.id DESC
         """
+
         df = pd.read_sql(query, conn)
 
     else:
+
         query = """
         SELECT
             b.id,
@@ -60,12 +65,90 @@ def show_convert_billing(conn):
         AND uca.user_id = %s
         ORDER BY b.id DESC
         """
+
         df = pd.read_sql(query, conn, params=(user_id,))
+
+    # ---------------- EMPTY ----------------
+
+    if df.empty:
+        st.info("No projections available")
+        return
+
+    # ---------------- FILTERS ----------------
+
+    st.subheader("Filters")
+
+    f1, f2, f3, f4 = st.columns(4)
+
+    # Client Filter
+    client_options = ["All"] + sorted(
+        df["Client"].dropna().unique().tolist()
+    )
+
+    selected_client = f1.selectbox(
+        "Client",
+        client_options
+    )
+
+    # Category Filter
+    category_options = ["All"] + sorted(
+        df["Category"].dropna().unique().tolist()
+    )
+
+    selected_category = f2.selectbox(
+        "Category",
+        category_options
+    )
+
+    # Program Filter
+    program_options = ["All"] + sorted(
+        df["Program"].dropna().unique().tolist()
+    )
+
+    selected_program = f3.selectbox(
+        "Program",
+        program_options
+    )
+
+    # Invoice Month Filter
+    month_options = ["All"] + sorted(
+        df["Invoice Month"].dropna().unique().tolist(),
+        reverse=True
+    )
+
+    selected_month = f4.selectbox(
+        "Invoice Month",
+        month_options
+    )
+
+    # ---------------- APPLY FILTERS ----------------
+
+    filtered_df = df.copy()
+
+    if selected_client != "All":
+        filtered_df = filtered_df[
+            filtered_df["Client"] == selected_client
+        ]
+
+    if selected_category != "All":
+        filtered_df = filtered_df[
+            filtered_df["Category"] == selected_category
+        ]
+
+    if selected_program != "All":
+        filtered_df = filtered_df[
+            filtered_df["Program"] == selected_program
+        ]
+
+    if selected_month != "All":
+        filtered_df = filtered_df[
+            filtered_df["Invoice Month"] == selected_month
+        ]
 
     # ---------------- TABLE ----------------
 
     selected = st.dataframe(
-        df,
+        filtered_df,
         use_container_width=True,
         selection_mode="single-row",
         on_select="rerun"
@@ -76,10 +159,12 @@ def show_convert_billing(conn):
     if selected["selection"]["rows"]:
 
         row_index = selected["selection"]["rows"][0]
-        projection_id = int(df.iloc[row_index]["id"])
-        row = df.iloc[row_index]
+
+        projection_id = int(filtered_df.iloc[row_index]["id"])
+        row = filtered_df.iloc[row_index]
 
         st.divider()
+
         st.subheader("Convert to Billing")
 
         st.text_input(
@@ -89,6 +174,7 @@ def show_convert_billing(conn):
         )
 
         # 🔥 UPDATED AMOUNT (EDITABLE + STATE)
+
         amount_key = f"amount_{projection_id}"
 
         if amount_key not in st.session_state:
@@ -107,7 +193,9 @@ def show_convert_billing(conn):
         )
 
         delete_reason = ""
+
         if status == "Deleted":
+
             delete_reason = st.text_area(
                 "Delete Reason",
                 key=f"reason_{projection_id}"
@@ -144,19 +232,33 @@ def show_convert_billing(conn):
         """, conn, params=(projection_id,))
 
         if st.session_state.get("conv_vendor_id") != projection_id:
+
             st.session_state.conv_vendor_id = projection_id
-            st.session_state.vendor_rows = max(1, len(existing_vendors))
+            st.session_state.vendor_rows = max(
+                1,
+                len(existing_vendors)
+            )
 
         col1, col2 = st.columns(2)
 
-        if col1.button("Add Vendor", key=f"add_vendor_{projection_id}"):
+        if col1.button(
+            "Add Vendor",
+            key=f"add_vendor_{projection_id}"
+        ):
             st.session_state.vendor_rows += 1
 
-        if col2.button("Remove Vendor", key=f"remove_vendor_{projection_id}") and st.session_state.vendor_rows > 1:
+        if col2.button(
+            "Remove Vendor",
+            key=f"remove_vendor_{projection_id}"
+        ) and st.session_state.vendor_rows > 1:
+
             st.session_state.vendor_rows -= 1
 
         vendor_data = []
-        vendor_options = ["None"] + list(vendors["vendor_name"])
+
+        vendor_options = ["None"] + list(
+            vendors["vendor_name"]
+        )
 
         for i in range(st.session_state.vendor_rows):
 
@@ -166,10 +268,17 @@ def show_convert_billing(conn):
             default_vendor_name = "None"
 
             if i < len(existing_vendors):
-                default_amount = float(existing_vendors.iloc[i]["amount"])
+
+                default_amount = float(
+                    existing_vendors.iloc[i]["amount"]
+                )
+
                 vendor_id = existing_vendors.iloc[i]["vendor_id"]
 
-                match = vendors[vendors["id"] == vendor_id]
+                match = vendors[
+                    vendors["id"] == vendor_id
+                ]
+
                 if not match.empty:
                     default_vendor_name = match.iloc[0]["vendor_name"]
 
@@ -187,21 +296,37 @@ def show_convert_billing(conn):
             )
 
             if vendor_name != "None" and vendor_amount > 0:
+
                 vendor_id = int(
                     vendors.loc[
-                        vendors["vendor_name"] == vendor_name, "id"
+                        vendors["vendor_name"] == vendor_name,
+                        "id"
                     ].iloc[0]
                 )
-                vendor_data.append((vendor_id, vendor_amount))
 
-        total_vendor = sum([amt for _, amt in vendor_data])
-        margin = float(st.session_state[amount_key]) - total_vendor
-        st.subheader(f"💰 Margin: ₹ {margin:,.0f}")
+                vendor_data.append(
+                    (vendor_id, vendor_amount)
+                )
+
+        total_vendor = sum(
+            [amt for _, amt in vendor_data]
+        )
+
+        margin = (
+            float(st.session_state[amount_key])
+            - total_vendor
+        )
+
+        st.subheader(
+            f"💰 Margin: ₹ {margin:,.0f}"
+        )
 
         # ---------------- SAVE ----------------
 
-
-        if st.button("Save", key=f"save_{projection_id}"):
+        if st.button(
+            "Save",
+            key=f"save_{projection_id}"
+        ):
 
             import requests
 
@@ -213,14 +338,19 @@ def show_convert_billing(conn):
 
             payload = {
                 "projection_id": projection_id,
-                "amount": float(st.session_state[amount_key]),  # ✅ UPDATED
+                "amount": float(
+                    st.session_state[amount_key]
+                ),
                 "status": status,
                 "delete_reason": delete_reason,
                 "funnel_number": funnel_number,
                 "invoice_no": invoice_no,
                 "invoice_date": str(invoice_date),
                 "vendors": [
-                    {"vendor_id": vid, "amount": amt}
+                    {
+                        "vendor_id": vid,
+                        "amount": amt
+                    }
                     for vid, amt in vendor_data
                 ]
             }
@@ -230,23 +360,38 @@ def show_convert_billing(conn):
             }
 
             try:
+
                 res = requests.post(
                     f"{BASE_URL}/api/convert-billing",
                     json=payload,
                     headers=headers
                 )
 
-                st.write(res.status_code, res.text)
+                st.write(
+                    res.status_code,
+                    res.text
+                )
 
                 if res.status_code != 200:
-                    st.error(res.json().get("detail", "Error"))
+
+                    st.error(
+                        res.json().get(
+                            "detail",
+                            "Error"
+                        )
+                    )
+
                     return
 
                 # 🔥 AUDIT LOG ADDED
+
                 old_amount = float(row["Amount"])
-                new_amount = float(st.session_state[amount_key])
+                new_amount = float(
+                    st.session_state[amount_key]
+                )
 
                 if old_amount != new_amount:
+
                     log_audit(
                         user_id,
                         "UPDATE_BILLING_AMOUNT",
@@ -262,4 +407,7 @@ def show_convert_billing(conn):
                 return
 
             except Exception as e:
-                st.error(f"Error connecting to backend: {e}")
+
+                st.error(
+                    f"Error connecting to backend: {e}"
+                )

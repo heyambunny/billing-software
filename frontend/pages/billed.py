@@ -30,6 +30,7 @@ def show_billed_amount(conn):
         p.program_name AS "Program",
         cat.category_name AS "Category",
         b.invoice_no AS "Invoice No",
+        b.invoice_description AS "Invoice Description",
         b.invoice_date AS "Invoice Date",
         b.client_billed_amount AS "Billed Amount"
     FROM billing_entries b
@@ -54,9 +55,82 @@ def show_billed_amount(conn):
         st.info("No billed invoices found")
         return
 
+    # ---------------- FILTERS ----------------
+    st.subheader("Filters")
+
+    f1, f2, f3, f4 = st.columns(4)
+
+    # Client Filter
+    client_options = ["All"] + sorted(
+        df["Client"].dropna().unique().tolist()
+    )
+
+    selected_client = f1.selectbox(
+        "Client",
+        client_options
+    )
+
+    # Category Filter
+    category_options = ["All"] + sorted(
+        df["Category"].dropna().unique().tolist()
+    )
+
+    selected_category = f2.selectbox(
+        "Category",
+        category_options
+    )
+
+    # Program Filter
+    program_options = ["All"] + sorted(
+        df["Program"].dropna().unique().tolist()
+    )
+
+    selected_program = f3.selectbox(
+        "Program",
+        program_options
+    )
+
+    # Invoice Month Filter
+    df["Invoice Month"] = pd.to_datetime(
+        df["Invoice Date"]
+    ).dt.strftime("%b-%Y")
+
+    month_options = ["All"] + sorted(
+        df["Invoice Month"].dropna().unique().tolist(),
+        reverse=True
+    )
+
+    selected_month = f4.selectbox(
+        "Invoice Month",
+        month_options
+    )
+
+    # ---------------- APPLY FILTERS ----------------
+    filtered_df = df.copy()
+
+    if selected_client != "All":
+        filtered_df = filtered_df[
+            filtered_df["Client"] == selected_client
+        ]
+
+    if selected_category != "All":
+        filtered_df = filtered_df[
+            filtered_df["Category"] == selected_category
+        ]
+
+    if selected_program != "All":
+        filtered_df = filtered_df[
+            filtered_df["Program"] == selected_program
+        ]
+
+    if selected_month != "All":
+        filtered_df = filtered_df[
+            filtered_df["Invoice Month"] == selected_month
+        ]
+
     # ---------------- TABLE ----------------
     selected = st.dataframe(
-        df,
+        filtered_df,
         use_container_width=True,
         selection_mode="single-row",
         on_select="rerun"
@@ -66,8 +140,8 @@ def show_billed_amount(conn):
     if selected["selection"]["rows"]:
 
         row_index = selected["selection"]["rows"][0]
-        billing_id = int(df.iloc[row_index]["id"])
-        row = df.iloc[row_index]
+        billing_id = int(filtered_df.iloc[row_index]["id"])
+        row = filtered_df.iloc[row_index]
 
         st.divider()
         st.subheader("Billing Details")
@@ -117,7 +191,10 @@ def show_billed_amount(conn):
         # ================= VENDORS =================
         st.subheader("Vendor Expenses")
 
-        vendors = pd.read_sql("SELECT id, vendor_name FROM vendors ORDER BY vendor_name", conn)
+        vendors = pd.read_sql(
+            "SELECT id, vendor_name FROM vendors ORDER BY vendor_name",
+            conn
+        )
 
         existing_vendors = pd.read_sql("""
             SELECT vendor_id, amount
@@ -156,9 +233,12 @@ def show_billed_amount(conn):
             if default_vendor_id:
                 try:
                     default_name = vendors.loc[
-                        vendors["id"] == default_vendor_id, "vendor_name"
+                        vendors["id"] == default_vendor_id,
+                        "vendor_name"
                     ].iloc[0]
+
                     default_index = vendor_options.index(default_name)
+
                 except:
                     default_index = 0
             else:
@@ -178,15 +258,26 @@ def show_billed_amount(conn):
             )
 
             if vendor_name != "None" and vendor_amount > 0:
+
                 vendor_id = int(
-                    vendors.loc[vendors["vendor_name"] == vendor_name, "id"].iloc[0]
+                    vendors.loc[
+                        vendors["vendor_name"] == vendor_name,
+                        "id"
+                    ].iloc[0]
                 )
-                vendor_data.append((vendor_id, float(vendor_amount)))
+
+                vendor_data.append(
+                    (vendor_id, float(vendor_amount))
+                )
+
                 total_vendor += vendor_amount
 
         # ================= MARGIN =================
         margin = billed_amount - total_vendor - total_cn
-        st.subheader(f"💰 Margin: ₹ {margin:,.0f}")
+
+        st.subheader(
+            f"💰 Margin: ₹ {margin:,.0f}"
+        )
 
         # ================= SAVE (API) =================
         if st.button("Update Billing"):
@@ -204,7 +295,10 @@ def show_billed_amount(conn):
                     "cn_description": cn_desc.strip()
                 },
                 "vendors": [
-                    {"vendor_id": vid, "amount": amt}
+                    {
+                        "vendor_id": vid,
+                        "amount": amt
+                    }
                     for vid, amt in vendor_data
                 ]
             }
