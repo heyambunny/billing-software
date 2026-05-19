@@ -17,6 +17,7 @@ from frontend.pages.billed import show_billed_amount
 from frontend.pages.edit_projection import show_edit_projection
 from frontend.pages.bulk_upload import show_bulk_upload
 from frontend.pages.audit_logs import audit_log_page
+from frontend.pages.overview import render_overview_page as show_overview
 
 # ---------------------------
 # Page Config
@@ -97,8 +98,8 @@ role = st.session_state.get("role_id")
 # ---------------- ADMIN ----------------
 if role == 1:
 
-    tab0, tab1, tab2, tab3, tab4 = st.tabs([
-        "Dashboard", "Reports", "Client Access Control", "Bulk Upload", "Audit Logs"
+    tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Dashboard", "Reports", "Client Access Control", "Bulk Upload", "Audit Logs","Overview"
     ])
 
     with tab0:
@@ -118,6 +119,9 @@ if role == 1:
 
     with tab4:
         audit_log_page(conn)
+
+    with tab5:
+        show_overview(st.session_state.get("token"))
 
 # ---------------- SUPERVISOR ----------------
 elif role == 3:

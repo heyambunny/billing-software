@@ -299,10 +299,19 @@ def show_login():
                                 })
                                 st.query_params["token"] = token
                                 st.rerun()
-                        except Exception as e:
-                            st.error(f"❌  Could not reach the server. ({e})")
+                        except Exception :
+                            st.markdown("""<div style='text-align:center; padding-top:10px;'>
+                                        <h3 style='color:#6B3FFF;'>
+                                        Finance Engine Starting...
+                                        </h3>
+                                        <p style='color:#8A78BF; font-size:14px;'>
+                                        Please wait while backend services wake up 🚀
+                                        </p>
+                                        <img src="https://assets9.lottiefiles.com/packages/lf20_Stt1R2.json" alt="Loading..."
+                                        width="220">
+                                        </div>""", unsafe_allow_html=True)
 
-            # Divider inside the card
+            # Divider inside the card   
             st.markdown("""
             <div style="display:flex;align-items:center;gap:10px;margin:1.5rem 0 0;color:#C4B8EA;font-size:0.72rem;">
                 <div style="flex:1;height:1px;background:rgba(107,63,255,0.12);"></div>

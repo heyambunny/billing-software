@@ -33,3 +33,9 @@ app.include_router(client_access_router, prefix="/api")
 
 from backend.routes.bulk_upload import router as bulk_router
 app.include_router(bulk_router, prefix="/api")
+
+from backend.routes.overview import router as overview_router
+app.include_router(
+    overview_router,
+    prefix="/api"
+)
